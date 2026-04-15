@@ -2,7 +2,156 @@
 
 https://github.com/cashapp/sqldelight
 
-Version: 2.3.2
+SqlDelight version: 2.3.2
+
+More complex schema example with audit trigger and full-text search.
+
+```sql
+-- ----------------------------------------------------------------
+-- 1. user_profiles
+--    Central identity table; every other table references it.
+-- ----------------------------------------------------------------
+CREATE TABLE user_profiles (
+    user_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email       TEXT   NOT NULL,
+    username    TEXT   NOT NULL,
+    bio         TEXT,
+    is_banned   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Case-insensitive uniqueness on email & username
+CREATE UNIQUE INDEX user_profiles_lower_email_idx ON user_profiles (LOWER(email));
+CREATE UNIQUE INDEX user_profiles_lower_username_idx ON user_profiles (LOWER(username));
+CREATE INDEX user_profiles_lower_created_at_idx ON user_profiles (created_at);
+
+-- ----------------------------------------------------------------
+-- 2. CATEGORIES
+--    Stable lookup table; forums are grouped into categories.
+-- ----------------------------------------------------------------
+CREATE TABLE categories (
+    category_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name          TEXT   NOT NULL,
+    slug          TEXT   NOT NULL,
+    description   TEXT,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ 
+CREATE UNIQUE INDEX categories_lower_slug_idx ON categories (LOWER(slug));
+
+-- ----------------------------------------------------------------
+-- 3. THREADS
+--    A thread belongs to a category and is authored by a user.
+--    Keeps a denormalized reply_count and last_post_at for cheap
+--    listing queries (updated via app logic / trigger).
+-- ----------------------------------------------------------------
+CREATE TABLE threads (
+    thread_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    category_id   BIGINT NOT NULL REFERENCES categories (category_id) ON DELETE RESTRICT,
+    author_id     BIGINT NOT NULL REFERENCES user_profiles (user_id) ON DELETE RESTRICT,
+    title         TEXT   NOT NULL CHECK (LENGTH(title) BETWEEN 3 AND 300),
+    is_locked     BOOLEAN NOT NULL DEFAULT FALSE,
+    is_pinned     BOOLEAN NOT NULL DEFAULT FALSE,
+    reply_count   INTEGER NOT NULL DEFAULT 0 CHECK (reply_count >= 0),
+    last_post_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ 
+-- FK indexes (PostgreSQL does NOT auto-index FK columns)
+CREATE INDEX threads_category_id_idx ON threads (category_id);
+CREATE INDEX author_id_category_id_idx ON threads (author_id);
+ 
+-- Common listing queries: newest threads per category, pinned-first ordering
+CREATE INDEX threads_category_id_is_pinned_last_post_at_idx ON threads (category_id, is_pinned DESC, last_post_at DESC);
+CREATE INDEX threads_created_at_idx ON threads (created_at DESC);
+
+-- ----------------------------------------------------------------
+-- 4. POSTS
+--    Each row is one message inside a thread.
+--    parent_post_id enables optional nested / quoted replies.
+-- ----------------------------------------------------------------
+CREATE TABLE posts (
+    post_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    thread_id      BIGINT NOT NULL REFERENCES threads (thread_id) ON DELETE CASCADE,
+    author_id      BIGINT NOT NULL REFERENCES user_profiles   (user_id) ON DELETE RESTRICT,
+    parent_post_id BIGINT          REFERENCES posts   (post_id)   ON DELETE SET NULL,
+    body           TEXT   NOT NULL CHECK (LENGTH(body) BETWEEN 1 AND 100000),
+    is_deleted     BOOLEAN NOT NULL DEFAULT FALSE,     -- soft-delete; body replaced in app
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+ 
+-- FK indexes
+CREATE INDEX posts_thread_id_idx ON posts (thread_id);
+CREATE INDEX posts_author_id_idx ON posts (author_id);
+CREATE INDEX posts_parent_post_id_idx ON posts (parent_post_id) WHERE parent_post_id IS NOT NULL;
+ 
+-- Chronological paging within a thread (the dominant access pattern)
+CREATE INDEX posts_thread_id_created_at_idx ON posts (thread_id, created_at);
+ 
+-- Full-text search over post bodies
+CREATE INDEX posts_body_gin ON posts USING GIN (to_tsvector('english', body));
+
+-- ----------------------------------------------------------------
+-- 5. REACTIONS
+--    Emoji-style reactions on posts (like, heart, laugh, …).
+--    One reaction type per user per post enforced by the UNIQUE
+--    constraint; change reaction = UPDATE, remove = DELETE.
+-- ----------------------------------------------------------------
+CREATE TYPE reaction_kind AS ENUM ('like', 'heart', 'laugh', 'sad', 'angry');
+ 
+CREATE TABLE    reactions (
+    reaction_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    post_id     BIGINT NOT NULL REFERENCES posts (post_id) ON DELETE CASCADE,
+    user_id     BIGINT NOT NULL REFERENCES user_profiles (user_id) ON DELETE CASCADE,
+    kind        reaction_kind NOT NULL,
+    created_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+ 
+    -- one reaction per user per post
+    CONSTRAINT uq_reaction_user_post UNIQUE (post_id, user_id)
+);
+
+-- FK indexes
+CREATE INDEX reactions_post_id_idx ON reactions (post_id);
+CREATE INDEX reactions_user_id_idx ON reactions (user_id);
+ 
+-- Aggregate reactions per post+kind efficiently
+CREATE INDEX reactions_post_id_kind_idx ON reactions (post_id, kind);
+
+-- ----------------------------------------------------------------
+-- 6. POST_EDITS  (audit log for post body changes)
+-- ----------------------------------------------------------------
+CREATE TABLE post_edits (
+    post_edit_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    post_id      BIGINT      NOT NULL REFERENCES posts (post_id) ON DELETE CASCADE,
+    edited_by    BIGINT      NOT NULL REFERENCES user_profiles (user_id) ON DELETE RESTRICT,
+    old_body     TEXT        NOT NULL,   -- what it said BEFORE the edit
+    edited_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX post_edits_post_id_idx ON post_edits (post_id);
+CREATE INDEX post_edits_edited_by_idx ON post_edits (edited_by);
+
+CREATE OR REPLACE FUNCTION audit_post_edit()
+RETURNS TRIGGER
+LANGUAGE PLPGSQL AS $$
+BEGIN
+    -- Only fire when the body actually changed
+    IF new.body IS DISTINCT FROM old.body THEN
+        INSERT INTO post_edits (post_id, edited_by, old_body, edited_at)
+        VALUES (old.post_id, new.author_id, old.body, NOW());
+        -- Keep updated_at in sync on the post itself
+        new.updated_at := NOW();
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER audit_post_edit
+BEFORE UPDATE ON posts
+FOR EACH ROW EXECUTE FUNCTION audit_post_edit();
+```
 
 ----
 
