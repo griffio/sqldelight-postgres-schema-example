@@ -1,0 +1,8 @@
+select:
+SELECT category_id, name, slug, description, display_order, created_at
+FROM categories
+WHERE category_id = :categoryId;
+
+insert:
+INSERT INTO categories (name, slug, description, display_order) VALUES ?
+RETURNING category_id, name, slug, description, display_order, created_at;

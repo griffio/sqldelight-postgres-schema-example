@@ -1,0 +1,8 @@
+select:
+SELECT user_id, email, username, bio, is_banned, created_at
+FROM user_profiles
+WHERE user_id = :userId;
+
+insert:
+INSERT INTO user_profiles (email, username, bio, is_banned) VALUES ?
+RETURNING user_id, email, username, bio, is_banned, created_at;

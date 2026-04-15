@@ -1,0 +1,14 @@
+select:
+SELECT post_id, thread_id, author_id, parent_post_id, body, is_deleted, created_at, updated_at
+FROM posts
+WHERE post_id = :postId;
+
+insert:
+INSERT INTO posts (thread_id, author_id, parent_post_id, body) VALUES ?
+RETURNING post_id, thread_id, author_id, parent_post_id, body, is_deleted, created_at, updated_at;
+
+updateBody:
+UPDATE posts SET body = :body, updated_at = NOW() WHERE post_id = :postId;
+
+updateDeleted:
+UPDATE posts SET is_deleted = :isDeleted, updated_at = NOW() WHERE post_id = :postId;

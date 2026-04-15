@@ -1,0 +1,8 @@
+select:
+SELECT reaction_id, post_id, user_id, kind, created_at
+FROM reactions
+WHERE post_id = :postId AND user_id = :userId;
+
+insert:
+INSERT INTO reactions (post_id, user_id, kind) VALUES ?
+RETURNING reaction_id, post_id, user_id, kind, created_at;

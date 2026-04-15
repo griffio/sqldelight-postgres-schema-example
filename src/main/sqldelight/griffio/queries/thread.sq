@@ -1,0 +1,8 @@
+select:
+SELECT thread_id, category_id, author_id, title, is_locked, is_pinned, reply_count, last_post_at, created_at
+FROM threads
+WHERE thread_id = :threadId;
+
+insert:
+INSERT INTO threads (category_id, author_id, title) VALUES ?
+RETURNING thread_id, category_id, author_id, title, is_locked, is_pinned, reply_count, last_post_at, created_at;
