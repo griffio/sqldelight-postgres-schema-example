@@ -22,7 +22,7 @@ sqldelight {
     databases {
         create("Sample") {
             deriveSchemaFromMigrations.set(true)
-            migrationOutputDirectory = file("$buildDir/generated/migrations")
+            migrationOutputDirectory = layout.buildDirectory.dir("generated/migrations").get().asFile
             migrationOutputFileFormat = ".sql" // Defaults to .sql
             packageName.set("griffio.queries")
             dialect(libs.sqldelight.postgresql.dialect)
@@ -43,7 +43,7 @@ flyway {
     url = "jdbc:postgresql://localhost:5432/forum-sample"
     user = "postgres"
     password = ""
-    locations = arrayOf("filesystem:$buildDir/generated/migrations")
+    locations = arrayOf("filesystem:${layout.buildDirectory.get().asFile}/generated/migrations")
     baselineOnMigrate = true
     baselineVersion = "0"
 }
