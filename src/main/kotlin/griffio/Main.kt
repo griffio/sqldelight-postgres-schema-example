@@ -19,6 +19,19 @@ private fun getSqlDriver() = PGSimpleDataSource().apply {
 val driver = getSqlDriver()
 val forum = Sample(driver)
 
+// Use data class for mapper instead of code gen table interface
+data class UserProfile(
+    val id: Long? = null,
+    val userName: String,
+    val email: String,
+    val bio: String?,
+    val isBanned: Boolean = false,
+    val createdAt: OffsetDateTime = OffsetDateTime.now()
+)
+
+// example use of mapper
+fun UserProfile.insert() = forum.profileQueries.insert2(email, userName, bio, isBanned, mapper = ::UserProfile).executeAsOne()
+
 fun stringIdentifier(n: Int) = (1..n).map { ('A'..'Z').random() }.joinToString("")
 fun longIdentifier(n: Int) = (1..n).map { (1..10).random() }.joinToString("").toLong()
 fun email(username: String) = "${username}@example.org"
@@ -84,16 +97,20 @@ fun Posts.insert() = forum.postQueries.insert(this).executeAsOne()
 fun Reactions.insert() = forum.reactionQueries.insert(this).executeAsOne()
 
 fun main() {
-
     val userName = stringIdentifier(10).lowercase()
+    val userName2 = stringIdentifier(10).lowercase()
     val emailAddress = email(userName).lowercase()
+    val emailAddress2 = email(userName2).lowercase()
     val profile = newUserProfile(userName, emailAddress, "bio for $userName").insert()
+    val newProfile = UserProfile(userName = userName2, email = emailAddress2, bio = "About $userName...").insert()
+
     val category = newCategory("Category $userName", userName, "description for $userName", 1).insert()
     val thread = newThread(category, profile, "Thread ${stringIdentifier(10)}").insert()
     val post = newPost(thread, profile, null, "Post ${stringIdentifier(128)}").insert()
     val reaction = newReaction(post, profile, "like").insert()
 
     println(profile)
+    println(newProfile)
     println(category)
     println(thread)
     println(post)
@@ -101,4 +118,7 @@ fun main() {
 
     println(forum.postQueries.updateBody("Updated body", post.post_id).value)
     println(forum.postQueries.updateDeleted(true, post.post_id).value)
+
+    // example use of mapper
+    println(forum.profileQueries.selectAllProfiles(mapper = ::UserProfile).executeAsList())
 }
