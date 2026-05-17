@@ -6,3 +6,12 @@ WHERE user_id = :userId;
 insert:
 INSERT INTO user_profiles (email, username, bio, is_banned) VALUES ?
 RETURNING user_id, email, username, bio, is_banned, created_at;
+
+insert2:
+INSERT INTO user_profiles (email, username, bio, is_banned) VALUES (:email, :username, :bio, :is_banned)
+RETURNING user_id, email, username, bio, is_banned, created_at;
+
+selectAllProfiles:
+SELECT user_id, email, username, bio, is_banned, created_at
+FROM user_profiles
+ORDER BY created_at;
